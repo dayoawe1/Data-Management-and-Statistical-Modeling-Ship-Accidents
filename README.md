@@ -1,5 +1,30 @@
 
-# "Data-Management-and-Statistical-Modeling-Ship Accidents"
+# Ship Accidents: Regression Modeling and Assumption Testing in R
+
+**Question:** What drives the number of damage incidents on ships, and does a normal linear regression model meet its assumptions on this data?
+
+**Data:** `ShipAccidents.csv` contains 40 ship groups. Each group is defined by a ship type (`construction1`–`construction3`, with one baseline type) and an operating period (`operational`). The response is `accidents`, the incident count. The predictors are `exposure` and the construction type, and `service_months` is aggregate months in service. Six groups with no service were dropped, leaving **n = 34**.
+
+**Methods:** multiple linear regression, F and t tests, residual diagnostics, Shapiro-Wilk normality test, the Cook-Weisberg / Breusch-Pagan score test for non-constant variance (`car::ncvTest`), a variance-stabilizing square-root transformation, and weighted least squares (WLS).
+
+## Key findings
+
+| Model | R² | Overall F-test p | Normality (Shapiro-Wilk p) | Constant variance (ncvTest) |
+|---|---|---|---|---|
+| OLS on `accidents` | 0.73 | 6.0e-08 | 0.073 ✓ | χ² = 7.39, **p = 0.0065 ✗** |
+| OLS on `sqrt(accidents)` | 0.83 | 6.2e-11 | 0.554 ✓ | χ² = 0.38, p = 0.537 ✓ |
+| WLS on `accidents`, weights = √service_months | 0.85 | — | 0.080 ✓ | χ² = 1.33, p = 0.250 ✓ |
+
+1. **Exposure is the dominant driver of accidents** (slope p = 1.3e-09). Ships with more exposure have significantly more incidents.
+2. **The untransformed model breaks the constant-variance assumption.** The residual spread grows with the fitted values, so its standard errors and p-values can't be fully trusted.
+3. **The square-root transformation fixed the problem.** It passed both the variance and normality tests, its residual plot looks like random noise, and fit improved from R² 0.73 to 0.83. **This is the recommended model.**
+4. **WLS passed the formal test, but I don't recommend it.** WLS weights are meant to be proportional to *1 / variance*. Weighting by √service_months gives *more* weight to ships with more service, which implies those ships have *less* variable accident counts. That is the opposite of what we would expect for count data. When I used the inverse weights (1/√service_months), the test failed (p = 0.0015). In addition, the residual plot still shows a pattern.
+5. **Next step:** Accidents are counts, so a **Poisson or negative binomial regression with log(service_months) as an offset** fits the data more naturally than a normal linear model. A Poisson fit shows overdispersion (deviance/df ≈ 2.1), which points to negative binomial.
+
+---
+
+## Full analysis
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -89,20 +114,20 @@ qplot(NormalModel$fitted.values,NormalModel$residuals)
 
 <img width="727" alt="ggplot1" src="https://github.com/user-attachments/assets/a58237dd-09cc-4f06-8c5f-a92a4a968744">
 
-conclusion: Since their is no bouncing of the dots randomly, it is not conclusive enough to conclude linearity in the regression functions.
+Conclusion: The residuals do not scatter randomly around zero. They fan out as the fitted values increase, so the plot alone does not confirm that the linear form is appropriate. It also points to the non-constant variance tested below.
 
 ```{r linearity formal}
 NormalModel = lm(accidents~exposure+construction1+construction2+construction3)
 summary(NormalModel)
 ```
 
-Hypothesis:
+Hypothesis (overall F-test):
 
- $H_0: \beta_1 = 0$ (no linear relationship)
+ $H_0: \beta_1 = \beta_2 = \beta_3 = \beta_4 = 0$ (no predictor is related to accidents)
  
- $H_A: \beta_1 ≠ 0$ (there is linear relationship between Y and X)
+ $H_A$: at least one $\beta_j ≠ 0$
  
-Conclusion: there is a significant linear relationship between target variable 'accidents' (Y) and the predictors or features (X's) since the p-value is 5.957e-08 which is less than $\alpha$ = 0.05, we therefore reject the null hypothesis and conclude, linearity in the regression function
+Conclusion: The overall F-test p-value is 5.957e-08, which is below $\alpha$ = 0.05. We reject $H_0$: the predictors together are significantly related to accidents. The slope for `exposure` is significant on its own (t-test p = 1.3e-09). Significance alone does not prove that the linear *form* is correct, so the residual plots above are still needed to check it.
 
 - b. Normality of variables
 
@@ -119,7 +144,7 @@ shapiro.test(NormalModel$residuals)
  
  $H_a$: Not normal
 
-conclusion: Since the p value is 0.0729 which is greater than alpha 0.05, we fail to reject the null and conclude normality of variables.
+Conclusion: The p-value is 0.0729, which is greater than $\alpha$ = 0.05. We fail to reject $H_0$, so there is no significant evidence that the residuals are non-normal.
 
 - c. Non-constant Variance
 
@@ -137,7 +162,7 @@ ncvTest(NormalModel)
  
  $H_a$: Non constant variance
 
-conclusion: Since the p value is 0.0065455 which is less than alpha 0.05, we reject the null and conclude constant variance in the error terms.
+Conclusion: The p-value is 0.0065 (χ² = 7.39), which is less than $\alpha$ = 0.05. We reject $H_0$ and conclude that the error variance is **not constant** (heteroscedasticity).
  
 - d. Independence of error terms 
 
@@ -162,7 +187,7 @@ OR
 
 This assumption means that each observed response comes from a distribution with the same level of variation, regardless of the specific response. In other words, while each response has some inherent variability, this variability remains constant across all observations. Although it doesn’t explicitly state that the variances across groups are equal, this is a natural consequence of the assumption. In this context, it implies that the "number of accidents" is drawn from a distribution with consistent, unchanging variation.
 
-When applying the ncvTest to the proposed normal model, the results provide evidence to reject the assumption of constant variance (X² = 4.6339, p = 0.0313). Furthermore, the residuals versus predicted values plot suggests increasing variance as predicted values rise. This plot indicates additional problems, such as a potential misfit in the relationship or missing predictors. Overall, the test shows signs of non-constant variation. If this violation is ignored, the actual distribution of the F-statistic becomes uncertain, making hypothesis tests potentially misleading.
+When applying the ncvTest to the proposed normal model, the results provide evidence to reject the assumption of constant variance (χ² = 7.39, p = 0.0065). Furthermore, the residuals versus predicted values plot suggests increasing variance as predicted values rise. This plot indicates additional problems, such as a potential misfit in the relationship or missing predictors. Overall, the test shows signs of non-constant variation. If this violation is ignored, the actual distribution of the F-statistic becomes uncertain, making hypothesis tests potentially misleading.
 
 ## Process of Using Transformation 
 
@@ -207,13 +232,13 @@ summary(SQRTModel)
 
 <img width="566" alt="SQRT" src="https://github.com/user-attachments/assets/a6396c0f-7347-4e64-8a5f-7d9b8ff62285">
 
-Hypothesis:
+Hypothesis (overall F-test):
 
-$H_0$: $\beta_1$ = 0 (no linear relationship)
+$H_0$: all slopes = 0
 
-H$_A$: $\beta_1$ ≠ 0 (there is linear relationship between y and x)
+$H_A$: at least one slope ≠ 0
 
-Conclusion: there is a significant linear relationship between Y and the Xs since the p-value is 6.219e-11 which is less than alpha 0.05, we therefore reject the null hypothesis and conclude, linearity in the regression function
+Conclusion: The overall F-test p-value is 6.219e-11, which is below 0.05, so the predictors are significantly related to √accidents. R² rises from 0.73 to 0.83, and the Shapiro-Wilk test on the residuals gives p = 0.554, with no evidence of non-normality.
 
 ```{r transformation normality }
 library(car)
@@ -313,4 +338,12 @@ qplot(WModel$fitted.values,WModel$residuals)
 
 <img width="732" alt="WmodelQplot" src="https://github.com/user-attachments/assets/d7df2ddc-9427-4628-8a8d-8bbb2597d0ed">
 
-Despite using the square root of service months as weights, the constant variance test still fails to detect significant heteroscedasticity (χ² = 1.3252, p = 0.2497). However, the residual plot continues to indicate potential heteroscedasticity. This suggests that other transformations of service months or additional predictors might be necessary to achieve a better-fitting model.
+With √service_months as weights, the constant-variance test no longer detects significant heteroscedasticity (χ² = 1.3252, p = 0.2497), and the residuals pass the normality test (Shapiro-Wilk p = 0.080). However, the residual plot still suggests some heteroscedasticity.
+
+**A caution about the weights:** In WLS, each weight should be proportional to 1 / Var(εᵢ). Weighting by √service_months assumes that ships with more service have *smaller* error variance. For accident counts, we would expect the reverse, because more time in service means larger and more variable counts. Using the inverse weights (1/√service_months) makes the test fail (p = 0.0015). The passing result above is therefore not strong evidence that WLS solved the problem.
+
+## Conclusion
+
+- The **square-root transformed model** is the best of the three. It meets the normality and constant-variance assumptions, and fit improves to R² = 0.83.
+- `exposure` is the strongest predictor of ship accidents in every model.
+- Because accidents are counts, the natural next model is a **Poisson or negative binomial GLM with log(service_months) as an offset**. A quick Poisson fit shows overdispersion (deviance/df ≈ 2.1), which favors negative binomial.
